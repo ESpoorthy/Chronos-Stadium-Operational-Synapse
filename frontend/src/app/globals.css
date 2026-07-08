@@ -107,3 +107,28 @@
 .glowing-border:hover::before {
   opacity: 1 !important;
 }
+
+/* ─── Keyboard Focus Styles (WCAG 2.4.7) ──────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* Remove focus ring for mouse users — only show for keyboard navigation */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ─── Screen Reader Only Utility ──────────────────────────────────────────── */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
