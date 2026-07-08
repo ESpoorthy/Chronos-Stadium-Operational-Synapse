@@ -2,8 +2,6 @@
 
 > "The world's first Generative Future Engine for Mega Events."
 
-![Architecture Preview](https://via.placeholder.com/1200x600/050816/4F8CFF?text=Chronos+Stadium+AI+-+System+Architecture)
-
 Traditional stadium systems monitor the present. Chronos predicts multiple possible futures. It continuously generates hundreds of possible operational scenarios from live stadium data, evaluates them using AI reasoning, explains the consequences, and recommends the best operational decisions before problems occur.
 
 ---
