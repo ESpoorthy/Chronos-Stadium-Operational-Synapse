@@ -67,7 +67,13 @@ cp .env.example .env
 ```
 Ensure you provide a valid `GEMINI_API_KEY`.
 
-### 3. Running Locally (Without Docker)
+### 3. Live Preview (ngrok)
+You can view the currently active live deployment of this MVP at:
+🔗 **[https://guise-reproduce-shredding.ngrok-free.dev](https://guise-reproduce-shredding.ngrok-free.dev)**
+
+*(Note: Ensure the local frontend server is running on port 3000 for this link to work).*
+
+### 4. Running Locally (Without Docker)
 
 **Start the Frontend:**
 ```bash
