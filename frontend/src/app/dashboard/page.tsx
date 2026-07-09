@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Activity,
@@ -18,6 +19,13 @@ import { StadiumMap } from "@/components/StadiumMap";
 
 export default function Dashboard() {
   const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  // Prevent theme-dependent rendering until after hydration to avoid
+  // server/client mismatch (next-themes returns undefined on the server).
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const handleExecutePlan = () => {
     toast.success("Diversion Plan Alpha Executed!", {
@@ -52,9 +60,12 @@ export default function Dashboard() {
           <button
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
             className="p-3 bg-secondary/50 hover:bg-secondary rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            aria-label={mounted && theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
           >
-            {theme === "dark" ? (
+            {/* Render a neutral placeholder before mount to avoid hydration mismatch */}
+            {!mounted ? (
+              <Moon className="w-5 h-5 opacity-0" aria-hidden="true" />
+            ) : theme === "dark" ? (
               <Sun className="w-5 h-5" aria-hidden="true" />
             ) : (
               <Moon className="w-5 h-5" aria-hidden="true" />
