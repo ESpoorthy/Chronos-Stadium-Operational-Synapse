@@ -17,3 +17,7 @@ alembic.ini
 
 # OS
 .DS_Store
+
+# Logs
+*.log
+ngrok.log
