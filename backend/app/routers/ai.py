@@ -1,24 +1,31 @@
 """
-Updated AI router with:
-- Strict Pydantic input validation (StadiumData schema)
-- Scenario length validation
-- Safe error messages that don't leak internal details
-- Rate limiting via slowapi
+AI simulation router.
+
+Exposes the POST /ai/simulate endpoint which drives the multi-agent
+future simulation pipeline.  The router is intentionally thin:
+  - Input validation is handled by Pydantic (ScenarioRequest).
+  - Business logic is delegated to SimulationService.
+  - Error categorisation ensures internal details are never leaked.
 """
 import logging
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
 from typing import List
-from app.agents.core import engine
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
+
 from app.schemas.stadium_data import StadiumData
-from langchain_core.messages import HumanMessage
+from app.services.simulation_service import simulation_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ai", tags=["AI Engine"])
 
 
+# ── Request / Response schemas ────────────────────────────────────────────────
+
 class ScenarioRequest(BaseModel):
+    """Validated request body for the /ai/simulate endpoint."""
+
     scenario: str = Field(
         ...,
         min_length=1,
@@ -32,51 +39,61 @@ class ScenarioRequest(BaseModel):
 
 
 class FutureItem(BaseModel):
-    probability: float
-    risk_score: float
-    description: str
-    operational_impact: str
-    recommended_decision: str
+    """A single simulated operational future returned by the engine."""
+
+    probability: float = Field(..., description="Estimated probability (0-100) that this future occurs.")
+    risk_score: float = Field(..., description="Composite risk score (0-10).")
+    description: str = Field(..., description="Human-readable description of this future scenario.")
+    operational_impact: str = Field(..., description="Qualitative impact label (e.g. Severe, Moderate).")
+    recommended_decision: str = Field(..., description="The highest-priority recommended action.")
 
 
 class SimulationResponse(BaseModel):
-    futures: List[dict]
-    messages: List[str]
+    """Response body returned by the /ai/simulate endpoint."""
+
+    futures: List[FutureItem] = Field(..., description="Ranked list of simulated futures.")
+    messages: List[str] = Field(..., description="Agent status messages from the pipeline.")
 
 
-@router.post("/simulate", response_model=SimulationResponse)
-async def run_simulation(request: ScenarioRequest):
-    """
-    Run the multi-agent future simulation engine for a given stadium scenario.
-    Returns ranked simulated futures with operational recommendations.
+# ── Endpoint ──────────────────────────────────────────────────────────────────
+
+@router.post(
+    "/simulate",
+    response_model=SimulationResponse,
+    summary="Run multi-agent future simulation",
+    description=(
+        "Accepts a natural language scenario and live stadium telemetry. "
+        "Returns a ranked list of simulated operational futures with risk "
+        "scores and recommended decisions."
+    ),
+)
+async def run_simulation(request: ScenarioRequest) -> SimulationResponse:
+    """Run the multi-agent future simulation engine.
+
+    Args:
+        request: Validated scenario and stadium telemetry.
+
+    Returns:
+        ``SimulationResponse`` containing ranked futures and agent messages.
+
+    Raises:
+        HTTPException 422: On invalid simulation parameters (e.g. empty scenario).
+        HTTPException 500: On unexpected engine failures.
     """
     try:
-        initial_state = {
-            "messages": [HumanMessage(content=request.scenario)],
-            "scenario": request.scenario,
-            "stadium_data": request.stadium_data.model_dump(),
-            "simulated_futures": [],
-        }
-
-        result = engine.invoke(initial_state)
-
-        messages = [
-            msg.content
-            for msg in result.get("messages", [])
-            if hasattr(msg, "content")
-        ]
-
-        return SimulationResponse(
-            futures=result.get("simulated_futures", []),
-            messages=messages,
+        result = simulation_service.run(
+            scenario=request.scenario,
+            stadium_data=request.stadium_data.model_dump(),
         )
-    except ValueError as e:
-        # Input-related errors — safe to surface
-        logger.warning("Simulation validation error: %s", e)
+        return SimulationResponse(
+            futures=[FutureItem(**f) for f in result["futures"]],
+            messages=result["messages"],
+        )
+    except ValueError as exc:
+        logger.warning("Simulation validation error: %s", exc)
         raise HTTPException(status_code=422, detail="Invalid simulation parameters.")
-    except Exception as e:
-        # Internal errors — log full detail but return a generic message
-        logger.error("Simulation engine error: %s", e, exc_info=True)
+    except Exception as exc:
+        logger.error("Simulation engine error: %s", exc, exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="An internal error occurred while running the simulation. Please try again.",

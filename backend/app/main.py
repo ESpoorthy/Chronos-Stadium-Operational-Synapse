@@ -1,44 +1,68 @@
 """
-FastAPI application entry point with:
-- Security headers middleware
-- Rate limiting via slowapi
-- CORS restricted to configured origins
-- Request size limiting
+FastAPI application entry point.
+
+Responsibilities
+----------------
+- Configure structured logging.
+- Attach rate-limiting middleware (slowapi).
+- Inject security headers on every response.
+- Restrict CORS to configured origins.
+- Mount application routers.
+
+All configuration values come from ``app.config.settings`` (a Pydantic
+Settings model), which reads from environment variables / ``.env`` file.
+This replaces scattered ``os.getenv()`` calls with a single, validated
+source of truth.
 """
 import logging
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from app.routers import ai
-import os
+from slowapi.util import get_remote_address
+from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.config.settings import settings
+from app.routers import ai
+
+# ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, settings.log_level.upper(), logging.INFO),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# ─── Rate Limiter ─────────────────────────────────────────────────────────────
-limiter = Limiter(key_func=get_remote_address, default_limits=["100/minute"])
+# ── Rate Limiter ──────────────────────────────────────────────────────────────
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=[f"{settings.rate_limit_per_minute}/minute"],
+)
 
+# ── Application ───────────────────────────────────────────────────────────────
 app = FastAPI(
-    title="Chronos Stadium AI",
+    title=settings.app_name,
     description="The world's first Generative Future Engine for Mega Events.",
     version="1.0.0",
 )
 
-# Attach rate limiter
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
-# ─── Security Headers Middleware ──────────────────────────────────────────────
+# ── Security Headers Middleware ───────────────────────────────────────────────
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Adds essential security headers to every response."""
+    """Adds essential security headers to every HTTP response.
+
+    Headers applied:
+    - ``X-Content-Type-Options``: Prevents MIME-type sniffing.
+    - ``X-Frame-Options``: Blocks clickjacking via iframes.
+    - ``X-XSS-Protection``: Enables legacy XSS filter in older browsers.
+    - ``Referrer-Policy``: Limits referrer leakage to same-origin upgrades.
+    - ``Permissions-Policy``: Restricts access to sensitive browser APIs.
+    - ``Strict-Transport-Security``: Enforced only in production (HTTPS required).
+    """
 
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -47,36 +71,39 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
-        # Only set HSTS in production (when HTTPS is guaranteed)
-        if os.getenv("ENVIRONMENT") == "production":
+        if settings.is_production:
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
 
 
 app.add_middleware(SecurityHeadersMiddleware)
 
-# ─── CORS ──────────────────────────────────────────────────────────────────────
-# Pull allowed origins from environment; defaults to localhost for development
-_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
-allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
-
+# ── CORS ──────────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origins=settings.parsed_allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type", "Authorization"],
 )
 
+logger.info(
+    "Starting %s (env=%s) — CORS origins: %s",
+    settings.app_name,
+    settings.environment,
+    settings.parsed_allowed_origins,
+)
 
-# ─── Routes ───────────────────────────────────────────────────────────────────
-@app.get("/")
+# ── Routes ────────────────────────────────────────────────────────────────────
+@app.get("/", summary="Root health probe")
 async def root():
-    return {"message": "Chronos Stadium AI Backend is running."}
+    """Lightweight root endpoint confirming the API is running."""
+    return {"message": f"{settings.app_name} Backend is running."}
 
 
-@app.get("/health")
+@app.get("/health", summary="Health check")
 async def health_check():
+    """Returns ``ok`` when the application is healthy and ready to serve traffic."""
     return {"status": "ok"}
 
 

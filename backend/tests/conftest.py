@@ -16,7 +16,11 @@ def client():
 
 @pytest.fixture
 def mock_initial_state():
-    """Fixture providing a valid initial agent state for testing."""
+    """Fixture providing a valid initial agent state for testing.
+
+    Includes all AgentState keys (including the new analysis fields
+    introduced in the transit-aware pipeline refactor).
+    """
     return {
         "messages": [HumanMessage(content="What if heavy rain starts at 7 PM?")],
         "scenario": "What if heavy rain starts at 7 PM?",
@@ -29,6 +33,9 @@ def mock_initial_state():
             "active_gates": 4,
         },
         "simulated_futures": [],
+        "crowd_analysis": "",
+        "weather_analysis": "",
+        "transit_analysis": "",
     }
 
 

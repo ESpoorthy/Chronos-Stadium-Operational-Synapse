@@ -3,14 +3,14 @@ Unit tests for the /ai/simulate FastAPI endpoint.
 Tests cover request validation, response schema, and error handling.
 """
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 from app.main import app
 
 client = TestClient(app)
 
 
-# ─── Health Check ────────────────────────────────────────────────────────────
+# ── Health Checks ─────────────────────────────────────────────────────────────
 
 def test_root_endpoint():
     """Root endpoint should return a running message."""
@@ -26,7 +26,7 @@ def test_health_check():
     assert response.json() == {"status": "ok"}
 
 
-# ─── /ai/simulate Success Cases ──────────────────────────────────────────────
+# ── /ai/simulate Success Cases ────────────────────────────────────────────────
 
 def test_simulate_returns_200_with_valid_payload(valid_simulate_payload):
     """A valid simulation request should return 200 with futures and messages."""
@@ -45,11 +45,9 @@ def test_simulate_futures_have_expected_keys(valid_simulate_payload):
     assert response.status_code == 200
     futures = response.json()["futures"]
     assert len(futures) > 0
+    required_keys = {"probability", "risk_score", "description", "operational_impact", "recommended_decision"}
     for future in futures:
-        assert "probability" in future
-        assert "risk_score" in future
-        assert "description" in future
-        assert "recommended_decision" in future
+        assert required_keys.issubset(future.keys())
 
 
 def test_simulate_futures_probability_is_valid_percentage(valid_simulate_payload):
@@ -68,7 +66,21 @@ def test_simulate_messages_are_strings(valid_simulate_payload):
         assert isinstance(msg, str)
 
 
-# ─── /ai/simulate Validation Cases ───────────────────────────────────────────
+def test_simulate_futures_sorted_by_probability(valid_simulate_payload):
+    """Futures should be returned with highest probability first."""
+    response = client.post("/ai/simulate", json=valid_simulate_payload)
+    probs = [f["probability"] for f in response.json()["futures"]]
+    assert probs == sorted(probs, reverse=True)
+
+
+def test_simulate_risk_score_non_negative(valid_simulate_payload):
+    """All risk scores should be non-negative."""
+    response = client.post("/ai/simulate", json=valid_simulate_payload)
+    for future in response.json()["futures"]:
+        assert future["risk_score"] >= 0
+
+
+# ── /ai/simulate Validation Cases ────────────────────────────────────────────
 
 def test_simulate_rejects_empty_scenario():
     """An empty scenario string should be rejected with 422 Unprocessable Entity."""
@@ -161,19 +173,52 @@ def test_simulate_rejects_negative_active_gates():
     assert response.status_code == 422
 
 
-# ─── /ai/simulate Error Handling ─────────────────────────────────────────────
+def test_simulate_rejects_invalid_weather_condition():
+    """An unlisted weather_condition should fail validation."""
+    payload = {
+        "scenario": "Test scenario",
+        "stadium_data": {
+            "crowd_density": 50,
+            "weather_condition": "tornado",  # Not in the Literal enum
+            "transit_status": "normal",
+            "temperature_celsius": 20.0,
+            "humidity_percent": 50.0,
+            "active_gates": 4,
+        },
+    }
+    response = client.post("/ai/simulate", json=payload)
+    assert response.status_code == 422
+
+
+def test_simulate_rejects_invalid_transit_status():
+    """An unlisted transit_status should fail validation."""
+    payload = {
+        "scenario": "Test scenario",
+        "stadium_data": {
+            "crowd_density": 50,
+            "weather_condition": "clear",
+            "transit_status": "on_fire",  # Not in the Literal enum
+            "temperature_celsius": 20.0,
+            "humidity_percent": 50.0,
+            "active_gates": 4,
+        },
+    }
+    response = client.post("/ai/simulate", json=payload)
+    assert response.status_code == 422
+
+
+# ── /ai/simulate Error Handling ───────────────────────────────────────────────
 
 def test_simulate_does_not_leak_internal_errors_on_failure(valid_simulate_payload):
     """On engine failure, the error detail should not expose raw exception messages."""
-    with patch("app.routers.ai.engine.invoke", side_effect=RuntimeError("Internal secret DB password")):
+    with patch("app.services.simulation_service.engine.invoke", side_effect=RuntimeError("Internal secret DB password")):
         response = client.post("/ai/simulate", json=valid_simulate_payload)
         assert response.status_code == 500
-        # Should NOT contain the raw exception text
         assert "Internal secret DB password" not in response.json().get("detail", "")
 
 
 def test_simulate_returns_500_on_engine_error(valid_simulate_payload):
     """Engine failures should return HTTP 500."""
-    with patch("app.routers.ai.engine.invoke", side_effect=RuntimeError("Engine crashed")):
+    with patch("app.services.simulation_service.engine.invoke", side_effect=RuntimeError("Engine crashed")):
         response = client.post("/ai/simulate", json=valid_simulate_payload)
         assert response.status_code == 500
